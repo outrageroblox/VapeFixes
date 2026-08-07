@@ -5,6 +5,7 @@ run(function()
 	local Mode
 	local Method
 	local MethodRay
+	local MethodHook
 	local IgnoredScripts
 	local Range
 	local HitChance
@@ -27,6 +28,8 @@ run(function()
 	ProjectileRaycast.RespectCanCollide = true
 	local fireoffset, rand, delayCheck = CFrame.identity, Random.new(), tick()
 	local oldnamecall, oldray
+	local rawgame, _othnamecall
+	local lasthookmethod = ''
 
 	local function getTarget(origin, obj)
 		if rand.NextNumber(rand, 0, 100) > (AutoFire.Enabled and 100 or HitChance.Value) then return end
@@ -123,7 +126,7 @@ run(function()
 						return oldray(unpack(args))
 					end)
 				else
-					oldnamecall = hookmetamethod(game, '__namecall', function(...)
+					local function hookf(...)
 						if getnamecallmethod() ~= Method.Value then
 							return oldnamecall(...)
 						end
@@ -145,7 +148,36 @@ run(function()
 							return unpack(res)
 						end
 						return oldnamecall(self, unpack(args))
-					end)
+					end
+
+					rawgame = getrawmetatable(game)
+					if isreadonly(rawgame) then
+						setreadonly(rawgame, false)
+					end
+
+					if MethodHook.Value == 'Rawset' then
+						oldnamecall = rawget(rawgame, '__namecall')
+						rawset(rawgame, '__namecall', hookf)
+						lasthookmethod = 'Rawset'
+					else
+						local usingoth = false
+						if MethodHook.Value == 'Oth' then
+							if oth and oth.hook then
+								_othnamecall = rawget(rawgame, '__namecall')
+								oldnamecall = oth.hook(rawget(rawgame, '__namecall'), hookf)
+
+								usingoth = true
+								lasthookmethod = 'Oth'
+							else
+								notif('SilentAim', 'Oth hook method requires oth library; hookmetamethod will be used instead!', 10, 'warning')
+							end
+						end
+
+						if not usingoth then
+							oldnamecall = hookmetamethod(game, '__namecall', hookf)
+							lasthookmethod = 'Hookmetamethod'
+						end
+					end
 				end
 
 				repeat
@@ -188,12 +220,23 @@ run(function()
 				until not SilentAim.Enabled
 			else
 				if oldnamecall then
-					hookmetamethod(game, '__namecall', oldnamecall)
+					if lasthookmethod == 'Rawset' then
+						rawset(rawgame, '__namecall', oldnamecall)
+					elseif lasthookmethod == 'Oth' and _othnamecall and (oth and oth.unhook) then
+						oth.unhook(_othnamecall)
+					else
+						hookmetamethod(game, '__namecall', oldnamecall)
+					end
 				end
 				if oldray then
 					hookfunction(Ray.new, oldray)
 				end
+				if rawgame then
+					setreadonly(rawgame, true)
+				end
+
 				oldnamecall, oldray = nil, nil
+				rawgame, _othnamecall = nil, nil
 			end
 		end,
 		ExtraText = function()
@@ -229,6 +272,17 @@ run(function()
 		List = {'All', 'Exclude', 'Include'},
 		Darker = true,
 		Visible = false
+	})
+	MethodHook = SilentAim:CreateDropdown({
+		Name = 'Hook Method',
+		List = {'Hookmetamethod', 'Oth', 'Rawset'},
+		Function = function(val)
+			if SilentAim.Enabled then
+				SilentAim:Toggle()
+				SilentAim:Toggle()
+			end
+		end,
+		Tooltip = 'Hookmetamethod - Uses standard hookmetamethod function\nOth - Uses oth library for hooking (if supported)\nRawset - Uses rawset function for hooking (best for bypassing)'
 	})
 	IgnoredScripts = SilentAim:CreateTextList({Name = 'Ignored Scripts'})
 	Range = SilentAim:CreateSlider({
